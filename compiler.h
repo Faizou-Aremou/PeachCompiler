@@ -48,6 +48,18 @@ struct lex_process
   void* private;
 };
 
+
+#define NUMERIC_CASE \
+     case '0':       \
+     case '1':       \
+     case '2':       \
+     case '3':       \
+     case '4':       \
+     case '5':       \
+     case '6':       \
+     case '7':       \
+     case '8':       \
+     case '9'      
 enum {
   LEXICAL_ANALYSIS_ALL_OK,
   LEXICAL_ANALYSIS_INPUT_ERROR
@@ -75,6 +87,7 @@ struct token
 {
   int type;
   int flags;
+  struct pos pos;  
   union
   { // tout ce qui est dans union est partagé,
     // donc accessible globalement
@@ -119,6 +132,10 @@ struct compile_process* compile_process_create(const char* filename, const char*
 char compile_process_next_char(struct lex_process* lex_process);
 char compile_process_peek_char(struct lex_process* lex_process);
 void compile_process_push_char(struct lex_process* lex_process, char c);
+
+
+void compiler_error(struct compile_process* compiler, const char* msg, ...);
+void compiler_warning(struct compile_process* compiler, const char* msg, ...);
 
 struct lex_process* lex_process_create(struct compile_process* compiler,
   struct lex_process_functions* functions,
