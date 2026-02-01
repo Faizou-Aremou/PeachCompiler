@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "helpers/vector.h"
 #include <stdlib.h>
+#include <string.h>
 
 // permet de récupérer les détails la ligne d'un token
 struct pos
@@ -47,7 +48,27 @@ struct lex_process
   // but the person using the lexer does understand
   void* private;
 };
+#define S_EQ(str, str2) \
+        (str && str2 && (strcmp(str, str2) == 0))
 
+#define OPERATOR_CASE_EXCLUDING_DIVISION \
+    case '+': \
+    case '-': \
+    case '*': \
+    case '>': \
+    case '<': \
+    case '^': \
+    case '%': \
+    case '!': \
+    case '=': \
+    case '~': \
+    case '|': \
+    case '&': \
+    case '(': \
+    case '[': \
+    case ',': \
+    case '.': \
+    case '?'
 
 #define NUMERIC_CASE \
      case '0':       \
@@ -59,7 +80,19 @@ struct lex_process
      case '6':       \
      case '7':       \
      case '8':       \
-     case '9'      
+     case '9'    
+
+#define SYMBOL_CASE \
+    case ')':       \
+    case '{':       \
+    case '}':       \
+    case ':':       \
+    case ';':       \
+    case '#':       \
+    case '\\':      \
+    case ']'
+
+
 enum {
   LEXICAL_ANALYSIS_ALL_OK,
   LEXICAL_ANALYSIS_INPUT_ERROR
@@ -87,7 +120,7 @@ struct token
 {
   int type;
   int flags;
-  struct pos pos;  
+  struct pos pos;
   union
   { // tout ce qui est dans union est partagé,
     // donc accessible globalement
@@ -147,4 +180,6 @@ void lex_process_free(struct lex_process* process);
 void* lex_process_private(struct lex_process* process);
 struct vector* lex_process_tokens(struct lex_process* process);
 int lex(struct lex_process* process);
+
+bool token_is_keyword(struct token* token, const char* value);
 #endif

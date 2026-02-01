@@ -17,7 +17,7 @@
        }      
 
 struct token* read_next_token();
-static struct lex_process* lex_process;
+static struct lex_process* lex_process; // variable globale
 static struct token tmp_token;
 static char peekc() {
   return lex_process->functions->peek_char(lex_process);
@@ -103,6 +103,155 @@ static struct token* token_make_string(char start_delim, char end_delim) {
   buffer_write(buf, 0x00);
   return token_create(&(struct token) { .type = TOKEN_TYPE_STRING, .sval = buffer_ptr(buf) });
 }
+
+static bool op_treated_as_one(char op) {
+  return op == '(' || op == '[' || op == ',' || op == '.' || op == '*' || op == '?';
+}
+static bool is_single_operator(char op) {
+  return op == '+' ||
+    op == '-' ||
+    op == '/' ||
+    op == '*' ||
+    op == '=' ||
+    op == '>' ||
+    op == '<' ||
+    op == '|' ||
+    op == '&' ||
+    op == '^' ||
+    op == '%' ||
+    op == '~' ||
+    op == '!' ||
+    op == '(' ||
+    op == '[' ||
+    op == ',' ||
+    op == '.' ||
+    op == '?';
+}
+static bool op_valid(const char* op) {
+  return S_EQ(op, "+") ||
+    S_EQ(op, "-") ||
+    S_EQ(op, "*") ||
+    S_EQ(op, "/") ||
+    S_EQ(op, "!") ||
+    S_EQ(op, "^") ||
+    S_EQ(op, "=") ||
+    S_EQ(op, "!=") ||
+    S_EQ(op, "+=") ||
+    S_EQ(op, "-=") ||
+    S_EQ(op, "*=") ||
+    S_EQ(op, "/=") ||
+    S_EQ(op, ">>") ||
+    S_EQ(op, "<<") ||
+    S_EQ(op, ">=") ||
+    S_EQ(op, "<=") ||
+    S_EQ(op, ">") ||
+    S_EQ(op, "<") ||
+    S_EQ(op, "==") ||
+    S_EQ(op, "++") ||
+    S_EQ(op, "--") ||
+    S_EQ(op, "&&") ||
+    S_EQ(op, "|") ||
+    S_EQ(op, "->") ||
+    S_EQ(op, ".") ||
+    S_EQ(op, "...") ||
+    S_EQ(op, "~") ||
+    S_EQ(op, "||") ||
+    S_EQ(op, "(") ||
+    S_EQ(op, "[") ||
+    S_EQ(op, "%");
+
+}
+
+static void read_op_flush_back_keep_first(struct buffer* buffer) {
+  const char* data = buffer_ptr(buffer);
+  int len = buffer->len;
+  for (int i = len - 1; i >= 1; i--) {
+    if (data[i] == 0x00) { continue; }
+    pushc(data[i]); // Remet le caractère dans le flux d'entrée
+  }
+}
+const char* read_op() {
+  bool single_operator = true;
+  char op = nextc(); // Lit le premier caractère
+  struct buffer* buf = buffer_create();
+  buffer_write(buf, op);
+
+  if (!op_treated_as_one(op)) {
+    char next_c = peekc();
+    if (is_single_operator(next_c)) {
+      buffer_write(buf, next_c);
+      nextc(); // Consomme le deuxième caractère
+      single_operator = false;
+    }
+  }
+
+  buffer_write(buf, 0x00);
+  char* ptr = buffer_ptr(buf);
+
+  if (!single_operator && !op_valid(ptr)) {
+    read_op_flush_back_keep_first(buf);
+    ptr[1] = 0x00; // On ne garde que le premier caractère
+  }
+  else if (!op_valid(ptr)) {
+    compiler_error(lex_process->compiler, "The operator %s is not valid\n", ptr);
+  }
+  return ptr;
+}
+static void lex_new_expression() {
+  // On incrémente le compteur d'expressions (parenthèses ouvertes)
+  lex_process->current_expression_count++;
+
+  // Si c'est la toute première parenthèse de la chaîne (ex: le début d'un calcul)
+  if (lex_process->current_expression_count == 1) {
+    // On initialise le buffer qui stockera le contenu entre parenthèses
+    lex_process->parentheses_buffer = buffer_create();
+  }
+}
+static void lex_finish_expression() {
+  lex_process->current_expression_count--;
+
+  // Sécurité : Vérifier si l'utilisateur ferme une parenthèse jamais ouverte
+  if (lex_process->current_expression_count < 0) {
+    compiler_error(lex_process->compiler, "You closed an expression that you never opened");
+  }
+}
+bool lex_is_in_expression() {
+  return lex_process->current_expression_count > 0;
+}
+static struct token* token_make_operator_or_string() {
+  char op = peekc();
+
+  // Cas spécial pour #include <file.h>
+  if (op == '<') {
+    struct token* last_token = lexer_last_token();
+    if (token_is_keyword(last_token, "include")) {
+      return token_make_string('<', '>');
+    }
+  }
+
+  struct token* token = token_create(&(struct token) { .type = TOKEN_TYPE_OPERATOR, .sval = read_op() });
+
+  if (op == '(') {
+    lex_new_expression();
+  }
+
+  return token;
+}
+static struct token* token_make_symbol() {
+  char c = nextc(); // On consomme le caractère du flux
+
+  // Si le symbole est une parenthèse fermante, on décrémente le compteur d'expression
+  if (c == ')') {
+    lex_finish_expression();
+  }
+
+  struct token* token = token_create(&(struct token) {
+    .type = TOKEN_TYPE_SYMBOL,
+      .cval = c
+  });
+
+  return token;
+}
 struct token* read_next_token()
 {
   struct token* token = NULL;
@@ -112,7 +261,13 @@ struct token* read_next_token()
   NUMERIC_CASE:
     token = token_make_number();
     break;
-
+    // Dans lexer.c
+  OPERATOR_CASE_EXCLUDING_DIVISION:
+    token = token_make_operator_or_string();
+    break;
+  SYMBOL_CASE:
+    token = token_make_symbol();
+    break;
   case '"':
     token = token_make_string('"', '"');
     break;
