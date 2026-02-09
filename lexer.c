@@ -273,6 +273,77 @@ static struct token* token_make_operator_or_string() {
 
   return token;
 }
+
+struct token* token_make_one_line_comment() {
+  struct buffer* buffer = buffer_create();
+  char c = 0;
+  LEX_GETC_IF(buffer, c, c != '\n' && c != EOF);
+
+  return token_create(&(struct token) {
+    .type = TOKEN_TYPE_COMMENT,
+      .sval = buffer_ptr(buffer)
+  });
+}
+
+struct token* token_make_multiline_comment() {
+  struct buffer* buffer = buffer_create();
+  char c = 0;
+
+  while (1) {
+    LEX_GETC_IF(buffer, c, c != '*' && c != EOF);
+
+    // Cas d'erreur : Fin de fichier atteinte sans fermeture du commentaire
+    if (c == EOF) {
+      compiler_error(lex_process->compiler, "You did not close this multiline comment");
+    }
+
+    // Si on tombe sur '*', on regarde si le suivant est '/'
+    if (c == '*') {
+      nextc();
+      if (peekc() == '/') {
+        // C'est la fin du commentaire '*/'
+        nextc(); // On consomme le '/'
+        break;
+      }
+    }
+  }
+
+  return token_create(&(struct token) {
+    .type = TOKEN_TYPE_COMMENT,
+      .sval = buffer_ptr(buffer)
+  });
+}
+
+struct token* handle_comment() {
+  char c = peekc();
+
+  // Si ce n'est pas un slash, ce n'est pas notre problème
+  if (c != '/') {
+    return NULL;
+  }
+
+  // On regarde le caractère SUIVANT (peek)
+  nextc(); // On consomme le premier '/'
+  char nextToPeek = peekc();
+
+  if (nextToPeek == '/') {
+    // Cas : // -> Commentaire mono-ligne
+    nextc(); // On consomme le 2ème '/'
+    return token_make_one_line_comment();
+  }
+  else if (nextToPeek == '*') {
+    // Cas : /* -> Commentaire multi-lignes
+    nextc(); // On consomme le '*'
+    return token_make_multiline_comment();
+  }
+
+  // Cas : / suivi d'autre chose -> C'est une DIVISION
+  // On doit "reculer" (unget/pushback) ou traiter le '/' comme opérateur
+  // Ici, le code du cours suggère de réutiliser la fonction de création d'opérateur
+  pushc('/');
+  return token_make_operator_or_string();
+}
+
 static struct token* token_make_symbol() {
   char c = nextc(); // On consomme le caractère du flux
 
@@ -318,11 +389,25 @@ static struct token* read_special_token() {
 
   return NULL;
 }
-
+struct token* token_make_newline() {
+  nextc();
+  // On crée et on retourne le token de type NEWLINE
+  return token_create(&(struct token) {
+    .type = TOKEN_TYPE_NEWLINE
+  });
+}
 struct token* read_next_token()
 {
   struct token* token = NULL;
   char c = peekc();
+
+  token = handle_comment();
+  if (token) {
+    return token;
+  }
+
+
+
   switch (c)
   {
   NUMERIC_CASE:
@@ -342,6 +427,9 @@ struct token* read_next_token()
   case ' ':
   case '\t':
     token = handle_whitespace();
+    break;
+  case '\n':
+    token = token_make_newline();
     break;
   case EOF:
     // we have finished lexical analysis on the file
